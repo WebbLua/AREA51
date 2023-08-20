@@ -1,6 +1,6 @@
 script_name("Special script for AREA 51")
 script_author("Leonid_Brezhnev")
-script_version_number(2)
+script_version_number(3)
 
 function try(f, catch_f)
     local status, exception = pcall(f)
@@ -158,6 +158,14 @@ local variables = {
         "[28] Старое золото", "[29] Оливковый",
         "[30] Серый", "[31] Серебро", "[32] Чёрный",
         "[33] Белый"
+    },
+    cmds = {
+        {"area", "открыть главное меню скрипта", false},
+        {"ud", "показать удостоверение", true},
+        {"port", "доложить о выезде в порт", false},
+        {"area reload", "перезагрузить скрипт", false},
+        {"area site", "открыть веб-сайт скрипт", false},
+        {"area github", "открыть гит-хаб скрипта", false}
     }
 }
 
@@ -204,19 +212,22 @@ function isUpdate()
         end
         if info['version_num'] ~= nil then
             if info['version_num'] > thisScript()['version_num'] then
-                msg(
-                    "Обнаружена новая версия скрипта...")
-            variables.url = info['url']
-            update()
+                variables.url = info['url']
+                update()
             end
         end
     end)
 end
 
 function update()
-    if variables.url == nil then msg("При обновлении произошла ошибка, нет ссылки!") return end
+    if variables.url == nil then
+        msg(
+            "При обновлении произошла ошибка, нет ссылки на файл!")
+        return
+    end
     variables.update = true
-    downloadUrlToFile(variables.url, thisScript().path, function(_, status, _, _)
+    downloadUrlToFile(variables.url, thisScript().path,
+                      function(_, status, _, _)
         if status == dlstatus.STATUS_ENDDOWNLOADDATA then
             msg("Скрипт был обновлён!")
             if script.find("ML-AutoReboot") == nil then
@@ -337,13 +348,14 @@ end
 function onScriptTerminate(s, bool)
     if s == thisScript() and not bool then
         imgui.Process = false
-        if not variables.update and not variables.unload and
-            not variables.reload then
+        if variables.reload then
+            msg("Перезагрузка...")
+            return
+        end
+        if not variables.update and not variables.unload then
             msg(
                 "Скрипт крашнулся, подробная информация в консоли (~)",
                 true)
-        else
-            msg("Перезагрузка...")
         end
     end
 end
@@ -665,10 +677,16 @@ function imgui.Hotkey(name, numkey, width)
     end
 end
 
-function cmd(param)
-    if param:find("reload") then
+function area(param)
+    if param == "reload" then
         variables.reload = true
         thisScript():reload()
+    elseif param == "site" then
+        os.execute("explorer http://" .. variables.ip .. ":" .. variables.port)
+        return
+    elseif param == "github" then
+        os.execute("explorer https://raw.githubusercontent.com/WebbLua/AREA51")
+        return
     end
     for k, v in pairs(config.hotkey) do
         local hk = makeHotKey(k)
@@ -676,6 +694,75 @@ function cmd(param)
     end
     variables.need.sethotkeys = 1
     imgui.main.v = not imgui.main.v
+end
+
+function ud(sid)
+    local id = tonumber(sid)
+    if id ~= nil then
+        if tonumber(id) < 0 or tonumber(id) > 999 then
+            msg("Неверный ID. Введите /ud [id]")
+            return
+        end
+        if not sampIsPlayerConnected(id) then
+            msg("Игрок оффлайн. Введите /ud [id]")
+            return
+        end
+        if not sampGetCharHandleBySampPlayerId(id) then
+            msg("Игрок не поблизости. Введите /ud [id]")
+            return
+        end
+        chatManager.addMessageToQueue("/showpass " .. id, true)
+    end
+    chatManager.addMessageToQueue(string.format(
+                                      "/me показал%s удостоверение в открытом виде",
+                                      config.personal.sex), true)
+    chatManager.addMessageToQueue(string.format(
+                                      "/do В удостоверении: «ARMY LV | %s | %s | %s»",
+                                      variables.nick:gsub("_", " "),
+                                      (config.personal.division == "" and
+                                          "Без подразделения" or
+                                          config.personal.division),
+                                      config.personal.rank), true)
+end
+
+function port()
+    local skin = getCharModel(PLAYER_PED)
+    if skin ~= 287 and skin ~= 191 then
+        msg("Вы не в военной форме")
+        return
+    end
+    if not isCharInAnyCar(PLAYER_PED) then
+        msg("Вы не в транспорте")
+        return
+    end
+    local mycar = storeCarCharIsInNoSave(PLAYER_PED)
+    local comrades = ""
+    for _, ped in ipairs(getAllChars()) do
+        if ped ~= PLAYER_PED then
+            if isCharInAnyCar(ped) then
+                local pedcar = storeCarCharIsInNoSave(ped)
+                if mycar == pedcar then
+                    local result, id = sampGetPlayerIdByCharHandle(ped)
+                    if result then
+                        local pedskin = getCharModel(ped)
+                        if pedskin == 287 or skin == 191 then
+                            local surname = sampGetPlayerNickname(id):match(".*_(.*)")
+                            comrades = comrades ~= "" and comrades .. ", " .. surname or surname
+                        end
+                    end
+                end
+            end
+        end
+    end
+    local one = string.format("Выехал%s в порт", config.personal.sex)
+    local more = comrades ~= "" and ". Напарники: " .. comrades or ""
+    f(one .. more)
+end
+
+function f(...)
+    if ... ~= nil and ... ~= "" then
+        chatManager.addMessageToQueue(string.format("/f %s %s", config.personal.tag, ...))
+    end
 end
 
 function imgui.OnDrawFrame()
@@ -852,8 +939,27 @@ function imgui.OnDrawFrame()
         imgui.SameText(
             "Автоматически брать pickup выхода")
         imgui.EndChild()
+        imgui.SameLine()
+        imgui.BeginChild("Команды", vec(150, 95), true)
+        imgui.Columns(2, "##cmds", true)
+        for i = 1, #variables.cmds do
+            local cmd = variables.cmds[i]
+            if imgui.Selectable("/" .. cmd[1]) then
+                if not cmd[3] then
+                    sampProcessChatInput(string.format("/%s", cmd[1]))
+                else
+                    sampSetChatInputEnabled(true)
+                    sampSetChatInputText(string.format("/%s ", cmd[1]))
+                end
+            end
+            imgui.NextColumn()
+            imgui.Text(cmd[2])
+            imgui.Separator()
+            imgui.NextColumn()
+        end
+        imgui.EndChild()
         imgui.SetCursorPos(vec(156.7, 128))
-        imgui.BeginChild("Прочее", vec(150, 298), true)
+        imgui.BeginChild("Прочее", vec(150, 200), true)
         if imgui.ToggleButton("##checkfood_satiety",
                               imgui.ImBool(config.checkfood.satiety)) then
             config.checkfood.satiety = not config.checkfood.satiety
@@ -896,11 +1002,11 @@ function main()
         update(url)
         return
     end
-    -- if not sampGetCurrentServerName():match("Under") then
-    --     msg("Скрипт работает на Samp-RP Underground", true)
-    --     variables.unload = true
-    --     thisScript():unload()
-    -- end
+    if not sampGetCurrentServerName():match("Under") then
+        msg("Скрипт работает на Samp-RP Underground", true)
+        variables.unload = true
+        thisScript():unload()
+    end
     local result, id = sampGetPlayerIdByCharHandle(PLAYER_PED)
     if not result then
         msg("Не удалось получить ваш игровой ID",
@@ -926,9 +1032,9 @@ function main()
     local ini = {
         personal = {
             clist = 0,
-            rank = "",
+            rank = "Гражданский",
             tag = "",
-            division = "",
+            division = "Без подразделения",
             sex = "",
             fractionseedo = false
         },
@@ -991,7 +1097,9 @@ function main()
     imgui.initBuffers()
     renderfont = renderCreateFont("times", toScreenX(9 / 3), 12)
 
-    sampRegisterChatCommand("area", cmd)
+    sampRegisterChatCommand("area", area)
+    sampRegisterChatCommand("ud", ud)
+    sampRegisterChatCommand("port", port)
     imgui.Process = true
 
     chatManager.initQueue()
@@ -1070,16 +1178,21 @@ function setPlayerClist(clist)
             needclist = clist
         end
         chatManager.addMessageToQueue("/clist " .. needclist, true)
-        if config.clist.me then 
-            wait(1300) 
+        if config.clist.me then
+            wait(1300)
             local newclist = variables.clists[sampGetPlayerColor(myid)]
             if newclist ~= tonumber(needclist) then
                 msg("Клист не был надет")
                 return
             elseif newclist == 0 then
-                chatManager.addMessageToQueue(string.format("/me снял%s %s", config.personal.sex, config.clistmsg[myclist]))
+                chatManager.addMessageToQueue(
+                    string.format("/me снял%s %s", config.personal.sex,
+                                  config.clistmsg[myclist]))
             else
-                chatManager.addMessageToQueue(string.format("/me надел%s %s", config.personal.sex, config.clistmsg[newclist]))
+                chatManager.addMessageToQueue(string.format(
+                                                  "/me надел%s %s",
+                                                  config.personal.sex,
+                                                  config.clistmsg[newclist]))
             end
         end
     end)
@@ -1088,15 +1201,22 @@ end
 function sampev.onShowDialog(dialogId, style, title, button1, button2, text)
     if dialogId == 22 and style == 4 and title ==
         "Статистика персонажа" then
-        if string.find(text, "Организация%s+Army LV") then
-            local i = tonumber(string.match(text, "Ранг.*%[(%d+)%]"))
-            if i ~= nil then
-                local rank = variables.ranks[i]
-                config.personal.rank = rank ~= nil and rank or ""
-                inicfg.save(config, settings)
-            end
+        if not string.find(text, "Организация%s+Army LV") then
+            config.personal.rank = "Гражданский"
         end
-        if variables.need.stats then return false end
+        local i = tonumber(string.match(text, "Ранг.*%[(%d+)%]"))
+        if i ~= nil then
+            local rank = variables.ranks[i]
+            config.personal.rank = rank ~= nil and rank or
+                                       "Гражданский"
+        else
+            config.personal.rank = "Гражданский"
+        end
+        inicfg.save(config, settings)
+        if variables.need.stats then
+            variables.need.stats = false
+            return false
+        end
     end
     if dialogId == 245 and title == "Склад оружия" then
         variables.warehouse.taken = false
@@ -1292,6 +1412,16 @@ function sampev.onSendDeathNotification(reason, id)
     end
 end
 
+function sampev.onSendChat(message)
+    chatManager.lastMessage = message
+    chatManager.updateAntifloodClock()
+end
+
+function sampev.onSendCommand(message)
+    chatManager.lastMessage = message
+    chatManager.updateAntifloodClock()
+end
+
 _utf8 = load(
             [=[return function(utf8_func, in_encoding, out_encoding); if encoding == nil then; encoding = require("encoding"); encoding.default = "CP1251"; u8 = encoding.UTF8; end; if type(utf8_func) ~= "table" then; return false; end; if AnsiToUtf8 == nil or Utf8ToAnsi == nil then; AnsiToUtf8 = function(text); return u8(text); end; Utf8ToAnsi = function(text); return u8:decode(text); end; end; if _UTF8_FUNCTION_SAVE == nil then; _UTF8_FUNCTION_SAVE = {}; end; local change_var = "_G"; for s = 1, #utf8_func do; change_var = string.format('%s["%s"]', change_var, utf8_func[s]); end; if _UTF8_FUNCTION_SAVE[change_var] == nil then; _UTF8_FUNCTION = function(...); local pack = table.pack(...); readTable = function(t, enc); for k, v in next, t do; if type(v) == 'table' then; readTable(v, enc); else; if enc ~= nil and (enc == "AnsiToUtf8" or enc == "Utf8ToAnsi") then; if type(k) == "string" then; k = _G[enc](k); end; if type(v) == "string" then; t[k] = _G[enc](v); end; end; end; end; return t; end; return table.unpack(readTable({_UTF8_FUNCTION_SAVE[change_var](table.unpack(readTable(pack, in_encoding)))}, out_encoding)); end; local text = string.format("_UTF8_FUNCTION_SAVE['%s'] = %s; %s = _UTF8_FUNCTION;", change_var, change_var, change_var); load(text)(); _UTF8_FUNCTION = nil; end; return true; end]=])
 function utf8(...) pcall(_utf8(), ...) end
@@ -1302,3 +1432,5 @@ utf8({"print"}, "Utf8ToAnsi")
 utf8({"sampSetChatInputText"}, "Utf8ToAnsi")
 utf8({"sampev", "onShowDialog"}, "AnsiToUtf8", "Utf8ToAnsi")
 utf8({"sampev", "onServerMessage"}, "AnsiToUtf8", "Utf8ToAnsi")
+utf8({"sampev", "onSendChat"}, "AnsiToUtf8")
+utf8({"sampev", "onSendCommand"}, "AnsiToUtf8")
