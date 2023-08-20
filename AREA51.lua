@@ -1,6 +1,6 @@
 script_name("Special script for AREA 51")
 script_author("Leonid_Brezhnev")
-script_version_number(1)
+script_version_number(2)
 
 function try(f, catch_f)
     local status, exception = pcall(f)
@@ -32,19 +32,17 @@ function msg(text, error)
     end
 end
 
-local renderfont = renderCreateFont("times", 12, 12)
-
 local variables = {
     ip = nil,
     port = nil,
     request = {complete = true, free = true},
     serverdata = {},
+    reload = false,
     unload = false,
     update = false,
     nick = nil,
     id = nil,
-    clist = nil,
-    need = {clist = false, stats = false, sethotkeys = 2},
+    need = {reload = false, clist = false, stats = false, sethotkeys = 2},
     warehouse = {
         taken = false,
         parachuteTimer = 0,
@@ -249,7 +247,7 @@ function synchronization()
                 down = false
                 local url = string.format("http://%s:%d/%s", variables.ip,
                                           variables.port, data)
-                setClipboardText(url)
+                -- setClipboardText(url)
                 local response = request(url)
 
                 local errors = {
@@ -338,10 +336,13 @@ end
 function onScriptTerminate(s, bool)
     if s == thisScript() and not bool then
         imgui.Process = false
-        if not variables.update and not variables.unload then
+        if not variables.update and not variables.unload and
+            not variables.reload then
             msg(
                 "Скрипт крашнулся, подробная информация в консоли (~)",
                 true)
+        else
+            msg("Перезагрузка...")
         end
     end
 end
@@ -418,6 +419,16 @@ function chatManager.updateAntifloodClock()
         string.sub(chatManager.lastMessage, 1, 3) == "/t " then
         chatManager.antifloodClock = chatManager.antifloodClock + 0.5
     end
+end
+
+function getAllPickups() -- https://www.blast.hk/threads/13380/page-8#post-361600
+    local pu = {}
+    pPu = sampGetPickupPoolPtr() + 16388
+    for i = 0, 4095 do
+        local id = readMemory(pPu + 4 * i, 4)
+        if id ~= -1 then table.insert(pu, sampGetPickupHandleBySampId(i)) end
+    end
+    return pu
 end
 
 function string.split(str, delim, plain) -- bh FYP
@@ -653,7 +664,11 @@ function imgui.Hotkey(name, numkey, width)
     end
 end
 
-function switchmenu()
+function cmd(param)
+    if param:find("reload") then
+        variables.reload = true
+        thisScript():reload()
+    end
     for k, v in pairs(config.hotkey) do
         local hk = makeHotKey(k)
         if tonumber(hk[1]) ~= 0 then rkeys.unRegisterHotKey(hk) end
@@ -773,7 +788,11 @@ function imgui.OnDrawFrame()
         end
         imgui.EndChild()
         imgui.SameLine()
-        imgui.BeginChild("Горячие клавиши", vec(150, 37), true)
+        imgui.BeginChild("Горячие клавиши", vec(150, 51), true)
+        imgui.Hotkey("fraction", "fraction", 50)
+        imgui.SameText(string.format(
+                           "Написать текст в рацию\n(/f %s)",
+                           config.personal.tag))
         imgui.Hotkey("changeclist", "changeclist", 50)
         imgui.SameText(string.format(
                            "Переключить клист\n(/clist %d)",
@@ -832,8 +851,8 @@ function imgui.OnDrawFrame()
         imgui.SameText(
             "Автоматически брать pickup выхода")
         imgui.EndChild()
-        imgui.SetCursorPos(vec(156.7, 115))
-        imgui.BeginChild("Прочее", vec(150, 311), true)
+        imgui.SetCursorPos(vec(156.7, 128))
+        imgui.BeginChild("Прочее", vec(150, 298), true)
         if imgui.ToggleButton("##checkfood_satiety",
                               imgui.ImBool(config.checkfood.satiety)) then
             config.checkfood.satiety = not config.checkfood.satiety
@@ -855,6 +874,13 @@ function imgui.OnDrawFrame()
         end
         imgui.SameText(
             "Сбивать анимацию приёма психохила")
+        if imgui.ToggleButton("##fractionseedo",
+                              imgui.ImBool(config.personal.fractionseedo)) then
+            config.personal.fractionseedo = not config.personal.fractionseedo
+            inicfg.save(config, settings)
+        end
+        imgui.SameText(
+            "Отыгрывать /seedo при нажатии кнопки рации")
         imgui.EndChild()
         imgui.End()
     end
@@ -869,11 +895,11 @@ function main()
         update(url)
         return
     end
-    if not sampGetCurrentServerName():match("Under") then
-        msg("Скрипт работает на Samp-RP Underground", true)
-        variables.unload = true
-        thisScript():unload()
-    end
+    -- if not sampGetCurrentServerName():match("Under") then
+    --     msg("Скрипт работает на Samp-RP Underground", true)
+    --     variables.unload = true
+    --     thisScript():unload()
+    -- end
     local result, id = sampGetPlayerIdByCharHandle(PLAYER_PED)
     if not result then
         msg("Не удалось получить ваш игровой ID",
@@ -883,7 +909,6 @@ function main()
     end
     variables.id = id
     variables.nick = sampGetPlayerNickname(id)
-    variables.need.clist = true
 
     local AdressConfig = string.format("%s\\config", thisScript().directory)
     local AdressFolder = string.format("%s\\config\\AREA 51\\%s",
@@ -898,7 +923,14 @@ function main()
     settings = string.format("AREA 51\\%s\\settings.ini", variables.nick)
 
     local ini = {
-        personal = {clist = 0, rank = "", tag = "", division = "", sex = ""},
+        personal = {
+            clist = 0,
+            rank = "",
+            tag = "",
+            division = "",
+            sex = "",
+            fractionseedo = false
+        },
         clist = {area = false, death = false, duty = false, me = false},
         clistmsg = {
             [1] = "повязку №1",
@@ -948,7 +980,7 @@ function main()
         },
         server = {sendcoordinates = true, showcoordinates = true},
         checkfood = {satiety = false, mushroom = false, sbiv = false},
-        hotkey = {changeclist = "0", gribheal = "0"}
+        hotkey = {fraction = "0", changeclist = "0", gribheal = "0"}
     }
 
     if config == nil then
@@ -956,9 +988,9 @@ function main()
         inicfg.save(config, settings)
     end
     imgui.initBuffers()
+    renderfont = renderCreateFont("times", toScreenX(9 / 3), 12)
 
-    sampRegisterChatCommand("area", switchmenu)
-    sampRegisterChatCommand("lva", switchmenu)
+    sampRegisterChatCommand("area", cmd)
     imgui.Process = true
 
     chatManager.initQueue()
@@ -967,6 +999,7 @@ function main()
     msg("Скрипт загружен!")
     while sampGetPlayerScore(select(2, sampGetPlayerIdByCharHandle(PLAYER_PED))) <=
         0 and not sampIsLocalPlayerSpawned() do wait(0) end
+    variables.need.reload = true
     variables.need.stats = true
     chatManager.addMessageToQueue("/stats", true)
 
@@ -983,6 +1016,16 @@ function main()
             end
         end
         if variables.need.sethotkeys == 2 then
+            rkeys.registerHotKey(makeHotKey("fraction"), true, function()
+                sampSetChatInputEnabled(true)
+                sampSetChatInputText(
+                    string.format("/f %s ", config.personal.tag))
+                if config.personal.fractionseedo then
+                    chatManager.addMessageToQueue(
+                        "/seedo Голосовая связь активирована.",
+                        true)
+                end
+            end)
             rkeys.registerHotKey(makeHotKey("changeclist"), true, function()
                 if sampIsChatInputActive() or sampIsDialogActive(-1) or
                     isSampfuncsConsoleActive() then return end
@@ -997,7 +1040,7 @@ function main()
         end
         if variables.need.clist and config.clist.area then
             local skin = getCharModel(PLAYER_PED)
-            if skin == 287 or skin == 191 and
+            if skin ~= 287 and skin ~= 191 and
                 isCharInArea2d(PLAYER_PED, -84, 1606, 464, 2148, false) then
                 setPlayerClist(7)
                 variables.need.clist = false
@@ -1006,34 +1049,36 @@ function main()
     end
 end
 
-function setPlayerClist(cl)
+function setPlayerClist(clist)
     lua_thread.create(function()
-        if cl == nil then
-            local res, myid = sampGetPlayerIdByCharHandle(PLAYER_PED)
-            if not res then
-                msg("Не удалось узнать свой ID")
-                return
-            end
-            variables.clist = variables.clists[sampGetPlayerColor(myid)]
-            if variables.clist == nil then
-                msg(
-                    "Не удалось узнать номер своего цвета")
-                return
-            end
-            cl = variables.clist ~= 0 and 0 or config.personal.clist
+        local needclist
+        local res, myid = sampGetPlayerIdByCharHandle(PLAYER_PED)
+        if not res then
+            msg("Не удалось узнать свой ID")
+            return
         end
-        chatManager.addMessageToQueue(string.format("/clist %d", cl), true)
-        if config.clist.me then
-            wait(1300)
-            if cl ~= 0 then
-                chatManager.addMessageToQueue(string.format(
-                                                  "/me надел%s %s",
-                                                  config.personal.sex,
-                                                  config.clistmsg[cl]), true)
+        local myclist = variables.clists[sampGetPlayerColor(myid)]
+        if myclist == nil then
+            msg(
+                "Не удалось узнать номер своего цвета")
+            return
+        end
+        if clist == nil then
+            needclist = myclist == 0 and config.personal.clist or 0
+        else
+            needclist = clist
+        end
+        chatManager.addMessageToQueue("/clist " .. needclist, true)
+        if config.clist.me then 
+            wait(1300) 
+            local newclist = variables.clists[sampGetPlayerColor(myid)]
+            if newclist ~= tonumber(needclist) then
+                msg("Клист не был надет")
+                return
+            elseif newclist == 0 then
+                chatManager.addMessageToQueue(string.format("/me снял%s %s", config.personal.sex, config.clistmsg[myclist]))
             else
-                chatManager.addMessageToQueue(
-                    string.format("/me снял%s %s", config.personal.sex,
-                                  config.clistmsg[variables.clist]), true)
+                chatManager.addMessageToQueue(string.format("/me надел%s %s", config.personal.sex, config.clistmsg[newclist]))
             end
         end
     end)
@@ -1185,6 +1230,14 @@ function sampev.onShowDialog(dialogId, style, title, button1, button2, text)
 end
 
 function sampev.onServerMessage(col, text)
+    if col == -356056833 and string.find(text,
+                                         "^ Для восстановления доступа нажмите клавишу %'F6%' и введите %'%/restoreAccess%'") then
+        variables.need.clist = true
+        if variables.need.reload then
+            variables.reload = true
+            thisScript():reload()
+        end
+    end
     if col == -1342193921 and
         string.find(text,
                     "^ У вас недостаточно пачек рыбы$") then
@@ -1245,5 +1298,6 @@ function utf8(...) pcall(_utf8(), ...) end
 utf8({"sampSendChat"}, "Utf8ToAnsi")
 utf8({"sampAddChatMessage"}, "Utf8ToAnsi")
 utf8({"print"}, "Utf8ToAnsi")
+utf8({"sampSetChatInputText"}, "Utf8ToAnsi")
 utf8({"sampev", "onShowDialog"}, "AnsiToUtf8", "Utf8ToAnsi")
 utf8({"sampev", "onServerMessage"}, "AnsiToUtf8", "Utf8ToAnsi")
