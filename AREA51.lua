@@ -42,6 +42,7 @@ local variables = {
     update = false,
     nick = nil,
     id = nil,
+    url = nil,
     need = {reload = false, clist = false, stats = false, sethotkeys = 2},
     warehouse = {
         taken = false,
@@ -205,17 +206,17 @@ function isUpdate()
             if info['version_num'] > thisScript()['version_num'] then
                 msg(
                     "Обнаружена новая версия скрипта...")
-                return {info['url'], true}
-            else
-                return false
+            variables.url = info['url']
+            update()
             end
         end
     end)
 end
 
-function update(url)
+function update()
+    if variables.url == nil then msg("При обновлении произошла ошибка, нет ссылки!") return end
     variables.update = true
-    downloadUrlToFile(url, thisScript().path, function(_, status, _, _)
+    downloadUrlToFile(variables.url, thisScript().path, function(_, status, _, _)
         if status == dlstatus.STATUS_ENDDOWNLOADDATA then
             msg("Скрипт был обновлён!")
             if script.find("ML-AutoReboot") == nil then
@@ -895,11 +896,11 @@ function main()
         update(url)
         return
     end
-    if not sampGetCurrentServerName():match("Under") then
-        msg("Скрипт работает на Samp-RP Underground", true)
-        variables.unload = true
-        thisScript():unload()
-    end
+    -- if not sampGetCurrentServerName():match("Under") then
+    --     msg("Скрипт работает на Samp-RP Underground", true)
+    --     variables.unload = true
+    --     thisScript():unload()
+    -- end
     local result, id = sampGetPlayerIdByCharHandle(PLAYER_PED)
     if not result then
         msg("Не удалось получить ваш игровой ID",
@@ -996,9 +997,9 @@ function main()
     chatManager.initQueue()
     lua_thread.create(chatManager.checkMessagesQueueThread)
 
-    msg("Скрипт загружен!")
     while sampGetPlayerScore(select(2, sampGetPlayerIdByCharHandle(PLAYER_PED))) <=
         0 and not sampIsLocalPlayerSpawned() do wait(0) end
+    msg("Скрипт запущен - /area")
     variables.need.reload = true
     variables.need.stats = true
     chatManager.addMessageToQueue("/stats", true)
