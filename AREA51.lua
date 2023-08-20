@@ -895,11 +895,11 @@ function main()
         update(url)
         return
     end
-    -- if not sampGetCurrentServerName():match("Under") then
-    --     msg("Скрипт работает на Samp-RP Underground", true)
-    --     variables.unload = true
-    --     thisScript():unload()
-    -- end
+    if not sampGetCurrentServerName():match("Under") then
+        msg("Скрипт работает на Samp-RP Underground", true)
+        variables.unload = true
+        thisScript():unload()
+    end
     local result, id = sampGetPlayerIdByCharHandle(PLAYER_PED)
     if not result then
         msg("Не удалось получить ваш игровой ID",
