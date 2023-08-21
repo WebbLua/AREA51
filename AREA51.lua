@@ -1,6 +1,6 @@
 script_name("Special script for AREA 51")
 script_author("Leonid_Brezhnev")
-script_version_number(3)
+script_version_number(4)
 
 function try(f, catch_f)
     local status, exception = pcall(f)
@@ -15,6 +15,7 @@ try(function()
     rkeys = require 'rkeys'
     inicfg = require 'inicfg'
     dlstatus = require'moonloader'.download_status
+    ffi = require 'ffi'
     encoding = require 'encoding'
     encoding.default = 'CP1251'
     u8 = encoding.UTF8
@@ -33,10 +34,13 @@ function msg(text, error)
 end
 
 local variables = {
+    checkedUpdates = false,
     ip = nil,
     port = nil,
+    logined = false,
     request = {complete = true, free = true},
-    serverdata = {},
+    synchronization = {},
+    points = {},
     reload = false,
     unload = false,
     update = false,
@@ -163,9 +167,21 @@ local variables = {
         {"area", "открыть главное меню скрипта", false},
         {"ud", "показать удостоверение", true},
         {"port", "доложить о выезде в порт", false},
+        {"area login", "авторизоваться/зарег.", true},
         {"area reload", "перезагрузить скрипт", false},
         {"area site", "открыть веб-сайт скрипт", false},
         {"area github", "открыть гит-хаб скрипта", false}
+    },
+    responses = {
+        ["Error parsing JSON data"] = "Произошла ошибка при декодировании JSON информации сервером",
+        ["Error, nick must be in roleplay format"] = "Ваш ник не соответствует roleplay формату",
+        ["Incorrect request"] = "Запрос не валидный",
+        ['Successfully registered'] = "Успешная регистрация",
+        ['Error registering user'] = "Произошла ошибка при регистрации",
+        ['Password is invalid'] = "Пароль не валидный. Попробуйте /area login [password]",
+        ['Successfully logged in'] = "Успешная авторизация",
+        ['Error logging in'] = "Произошла ошибка при авторизации",
+        ['Wrong password'] = "Пароль неверный. Попробуйте /area login [password]"
     }
 }
 
@@ -216,6 +232,7 @@ function isUpdate()
                 update()
             end
         end
+        variables.checkedUpdates = true
     end)
 end
 
@@ -245,32 +262,29 @@ function synchronization()
             if result then
                 local nick = sampGetPlayerNickname(id)
                 local table = {
+                    type = "synchronization",
                     nick = nick,
                     id = id,
+                    password = tostring(config.personal.password),
                     query = tostring(os.clock()):gsub('%.', '')
                 }
-                if config.server.sendcoordinates then
+                if config.server.sendcoordinates and getActiveInterior() == 0 then
                     local x, y, z = getCharCoordinates(PLAYER_PED)
                     table.coordinates = {x = x, y = y, z = z}
                 end
                 local data = encodeJson(table)
-                local response_path = os.tmpname()
-                wait_for_response = true
-                down = false
                 local url = string.format("http://%s:%d/%s", variables.ip,
                                           variables.port, data)
                 -- setClipboardText(url)
                 local response = request(url)
 
-                local errors = {
-                    ["Error parsing JSON data"] = "Произошла ошибка при декодировании JSON информации сервером",
-                    ["Error, nick must be in roleplay format"] = "Ваш ник не соответствует roleplay формату"
-                }
                 if response ~= nil then
                     -- print(response)
-                    local error = errors[response]
+                    local error = variables.responses[response]
                     if error == nil then
-                        variables.serverdata = decodeJson(response)
+                        local serverdata = decodeJson(response)
+                        variables.synchronization = serverdata.synchronization
+                        variables.points = serverdata.points
                     else
                         print("{FF0000}" .. error)
                     end
@@ -284,7 +298,7 @@ function rendercoordinates()
     while true do
         wait(0)
         if getActiveInterior() == 0 and config.server.showcoordinates then
-            for nick, table in pairs(variables.serverdata) do
+            for nick, table in pairs(variables.synchronization) do
                 if table.coordinates ~= nil and nick ~= variables.nick then
                     if table.coordinates.x ~= nil and table.coordinates.y ~= nil and
                         table.coordinates.z ~= nil then
@@ -304,6 +318,36 @@ function rendercoordinates()
                                              table.delay, distance)
                             renderFontDrawText(renderfont, text, x, y,
                                                0xFFFFFFFF)
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+function renderpoints()
+    while true do
+        wait(0)
+        if getActiveInterior() == 0 and config.server.showpoints then
+            for nick, table in pairs(variables.points) do
+                if table.coordinates ~= nil then
+                    if table.coordinates.x ~= nil and table.coordinates.y ~= nil and
+                        table.coordinates.z ~= nil then
+                        local result, x, y, z =
+                            convert3DCoordsToScreenEx(table.coordinates.x,
+                                                      table.coordinates.y,
+                                                      table.coordinates.z)
+                        if result and z > 0 then
+                            local mx, my, mz = getCharCoordinates(PLAYER_PED)
+                            local distance =
+                                getDistanceBetweenCoords3d(mx, my, mz,
+                                                           table.coordinates.x,
+                                                           table.coordinates.y,
+                                                           table.coordinates.z)
+                            if distance <= 210 then
+                                renderDrawBox(x, y, 25, 25, 0xFFFF0000)
+                            end
                         end
                     end
                 end
@@ -432,6 +476,16 @@ function chatManager.updateAntifloodClock()
         string.sub(chatManager.lastMessage, 1, 3) == "/t " then
         chatManager.antifloodClock = chatManager.antifloodClock + 0.5
     end
+end
+
+function get_crosshair_position()
+    local vec_out = ffi.new("float[3]")
+    local tmp_vec = ffi.new("float[3]")
+    ffi.cast(
+        "void (__thiscall*)(void*, float, float, float, float, float*, float*)",
+        0x514970)(ffi.cast("void*", 0xB6F028), 15.0, tmp_vec[0], tmp_vec[1],
+                  tmp_vec[2], tmp_vec, vec_out)
+    return vec_out[0], vec_out[1], vec_out[2]
 end
 
 function getAllPickups() -- https://www.blast.hk/threads/13380/page-8#post-361600
@@ -687,6 +741,21 @@ function area(param)
     elseif param == "github" then
         os.execute("explorer https://raw.githubusercontent.com/WebbLua/AREA51")
         return
+    else
+        local params = {}
+        for v in string.gmatch(param, "[^%s]+") do
+            table.insert(params, v)
+        end
+        if params[1] == "login" then
+            if params[2] == nil or params[2] == "" then
+                msg(
+                    "Неверный пароль. Введите /area login [password]")
+                return
+            end
+            local password = params[2]
+            login(password)
+            return
+        end
     end
     for k, v in pairs(config.hotkey) do
         local hk = makeHotKey(k)
@@ -694,6 +763,93 @@ function area(param)
     end
     variables.need.sethotkeys = 1
     imgui.main.v = not imgui.main.v
+end
+
+function login(password)
+    lua_thread.create(function()
+        if variables.ip ~= nil and variables.port ~= nil then
+            local table = {
+                type = "login",
+                nick = variables.nick,
+                password = tostring(password),
+                query = tostring(os.clock()):gsub('%.', '')
+            }
+            local data = encodeJson(table)
+
+            local url = string.format("http://%s:%d/%s", variables.ip,
+                                      variables.port, data)
+            -- setClipboardText(url)
+            local response = request(url)
+            local antwort = variables.responses[response]
+            if response == 'Successfully logged in' then
+                config.personal.password = password
+                variables.logined = true
+            elseif response == 'Wrong password' then
+                config.personal.password = ""
+            elseif response == 'Successfully registered' then
+                config.personal.password = password
+                variables.logined = true
+            elseif response == 'Password is invalid' then
+                config.personal.password = ""
+            elseif response == 'No access' then
+                msg("Доступ к скрипту отсутствует")
+                variables.unload = true
+                thisScript():unload()
+            end
+            inicfg.save(config, settings)
+            if antwort ~= nil then
+                msg(antwort)
+                return
+            end
+        end
+    end)
+end
+
+function sendpoint()
+    lua_thread.create(function()
+        if sampIsChatInputActive() or sampIsDialogActive(-1) or
+            isSampfuncsConsoleActive() then return end
+        local result, id = sampGetPlayerIdByCharHandle(PLAYER_PED)
+        if result then
+            local nick = sampGetPlayerNickname(id)
+            local sx, sy = convert3DCoordsToScreen(get_crosshair_position())
+            local sw, sh = getScreenResolution()
+            local x, y, z
+            if sx >= 0 and sy >= 0 and sx < sw and sy < sh then
+                local posX, posY, posZ =
+                    convertScreenCoordsToWorld3D(sx, sy, 700.0)
+                local camX, camY, camZ = getActiveCameraCoordinates()
+                local result, colpoint =
+                    processLineOfSight(camX, camY, camZ, posX, posY, posZ, true,
+                                       true, true, true, true, true, true, true)
+                if not result then
+                    msg(
+                        "Не удалось определить точку фокуса",
+                        error)
+                    return
+                end
+                x, y, z = colpoint.pos[1], colpoint.pos[2], colpoint.pos[3]
+            end
+            local table = {
+                type = "points",
+                nick = nick,
+                id = id,
+                password = tostring(config.personal.password),
+                coordinates = {x = x, y = y, z = z},
+                query = tostring(os.clock()):gsub('%.', '')
+            }
+            local data = encodeJson(table)
+            local url = string.format("http://%s:%d/%s", variables.ip,
+                                      variables.port, data)
+            -- setClipboardText(url)
+            local response = request(url)
+            if response ~= nil then
+                -- print(response)
+                local error = variables.responses[response]
+                if error ~= nil then msg(error, true) end
+            end
+        end
+    end)
 end
 
 function ud(sid)
@@ -746,8 +902,10 @@ function port()
                     if result then
                         local pedskin = getCharModel(ped)
                         if pedskin == 287 or skin == 191 then
-                            local surname = sampGetPlayerNickname(id):match(".*_(.*)")
-                            comrades = comrades ~= "" and comrades .. ", " .. surname or surname
+                            local surname =
+                                sampGetPlayerNickname(id):match(".*_(.*)")
+                            comrades = comrades ~= "" and comrades .. ", " ..
+                                           surname or surname
                         end
                     end
                 end
@@ -761,7 +919,8 @@ end
 
 function f(...)
     if ... ~= nil and ... ~= "" then
-        chatManager.addMessageToQueue(string.format("/f %s %s", config.personal.tag, ...))
+        chatManager.addMessageToQueue(string.format("/f %s %s",
+                                                    config.personal.tag, ...))
     end
 end
 
@@ -831,8 +990,16 @@ function imgui.OnDrawFrame()
         end
         imgui.SameText(
             "Отрисовывать положение пользователей на экране")
+        if imgui.ToggleButton(string.format("##server_showpoints",
+                                            config.server.showpoints),
+                              imgui.ImBool(config.server.showpoints)) then
+            config.server.showpoints = not config.server.showpoints
+            inicfg.save(config, settings)
+        end
+        imgui.SameText(
+            "Отрисовывать метки, которые устанавливают пользователи")
         imgui.Text("Текущие пользователи онлайн:")
-        for nick, data in pairs(variables.serverdata) do
+        for nick, data in pairs(variables.synchronization) do
             imgui.Text(string.format("%s[%d] [Last request: %d sec]", nick,
                                      data.id, data.delay))
         end
@@ -876,7 +1043,7 @@ function imgui.OnDrawFrame()
         end
         imgui.EndChild()
         imgui.SameLine()
-        imgui.BeginChild("Горячие клавиши", vec(150, 51), true)
+        imgui.BeginChild("Горячие клавиши", vec(150, 66), true)
         imgui.Hotkey("fraction", "fraction", 50)
         imgui.SameText(string.format(
                            "Написать текст в рацию\n(/f %s)",
@@ -887,6 +1054,8 @@ function imgui.OnDrawFrame()
                            config.personal.clist))
         imgui.Hotkey("gribheal", "gribheal", 50)
         imgui.SameText("Употребить психохил\n(/grib heal)")
+        imgui.Hotkey("point", "point", 50)
+        imgui.SameText("Установить метку для внимания")
         imgui.EndChild()
         imgui.BeginChild("Взятие оружия со склада",
                          vec(150, 95), true)
@@ -958,7 +1127,7 @@ function imgui.OnDrawFrame()
             imgui.NextColumn()
         end
         imgui.EndChild()
-        imgui.SetCursorPos(vec(156.7, 128))
+        imgui.SetCursorPos(vec(156.7, 144))
         imgui.BeginChild("Прочее", vec(150, 200), true)
         if imgui.ToggleButton("##checkfood_satiety",
                               imgui.ImBool(config.checkfood.satiety)) then
@@ -998,6 +1167,7 @@ function main()
     while not isSampAvailable() do wait(0) end
     while sampGetCurrentServerName() == "SA-MP" do wait(0) end
     local url, status = isUpdate()
+    while not variables.checkedUpdates do wait(0) end
     if status then
         update(url)
         return
@@ -1036,7 +1206,8 @@ function main()
             tag = "",
             division = "Без подразделения",
             sex = "",
-            fractionseedo = false
+            fractionseedo = false,
+            password = ""
         },
         clist = {area = false, death = false, duty = false, me = false},
         clistmsg = {
@@ -1085,19 +1256,37 @@ function main()
             armor = false,
             parachute = false
         },
-        server = {sendcoordinates = true, showcoordinates = true},
+        server = {
+            sendcoordinates = true,
+            showcoordinates = true,
+            showpoints = true
+        },
         checkfood = {satiety = false, mushroom = false, sbiv = false},
-        hotkey = {fraction = "0", changeclist = "0", gribheal = "0"}
+        hotkey = {
+            fraction = "0",
+            changeclist = "0",
+            gribheal = "0",
+            point = "0"
+        }
     }
 
     if config == nil then
         config = inicfg.load(ini, settings)
         inicfg.save(config, settings)
     end
+
     imgui.initBuffers()
     renderfont = renderCreateFont("times", toScreenX(9 / 3), 12)
 
+    while sampGetPlayerScore(select(2, sampGetPlayerIdByCharHandle(PLAYER_PED))) <=
+        0 and not sampIsLocalPlayerSpawned() do wait(0) end
     sampRegisterChatCommand("area", area)
+    if config.personal.password ~= "" and config.personal.password ~= nil then
+        login(config.personal.password)
+    else
+        msg("Авторизируйтесь: /area login [password]")
+    end
+    while not variables.logined do wait(0) end
     sampRegisterChatCommand("ud", ud)
     sampRegisterChatCommand("port", port)
     imgui.Process = true
@@ -1105,8 +1294,6 @@ function main()
     chatManager.initQueue()
     lua_thread.create(chatManager.checkMessagesQueueThread)
 
-    while sampGetPlayerScore(select(2, sampGetPlayerIdByCharHandle(PLAYER_PED))) <=
-        0 and not sampIsLocalPlayerSpawned() do wait(0) end
     msg("Скрипт запущен - /area")
     variables.need.reload = true
     variables.need.stats = true
@@ -1114,6 +1301,7 @@ function main()
 
     lua_thread.create(synchronization)
     lua_thread.create(rendercoordinates)
+    lua_thread.create(renderpoints)
     lua_thread.create(checksatiety)
     while true do
         wait(0)
@@ -1145,6 +1333,7 @@ function main()
                     isSampfuncsConsoleActive() then return end
                 chatManager.addMessageToQueue("/grib heal", true)
             end)
+            rkeys.registerHotKey(makeHotKey("point"), true, sendpoint)
             variables.need.sethotkeys = 0
         end
         if variables.need.clist and config.clist.area then
