@@ -255,141 +255,6 @@ function update()
     end)
 end
 
-function synchronization()
-    while true do
-        wait(0)
-        if variables.ip ~= nil and variables.port ~= nil then
-            local result, id = sampGetPlayerIdByCharHandle(PLAYER_PED)
-            if result then
-                local nick = sampGetPlayerNickname(id)
-                local table = {
-                    type = "synchronization",
-                    nick = nick,
-                    id = id,
-                    password = tostring(config.personal.password),
-                    query = tostring(os.clock()):gsub('%.', '')
-                }
-                if config.server.sendcoordinates and getActiveInterior() == 0 then
-                    local x, y, z = getCharCoordinates(PLAYER_PED)
-                    table.coordinates = {x = x, y = y, z = z}
-                end
-                local data = encodeJson(table)
-                local url = string.format("http://%s:%d/%s", variables.ip,
-                                          variables.port, data)
-                -- setClipboardText(url)
-                local response = request(url)
-
-                if response ~= nil then
-                    -- print(response)
-                    local error = variables.responses[response]
-                    if error == nil then
-                        local serverdata = decodeJson(response)
-                        variables.synchronization = serverdata.synchronization
-                        variables.points = serverdata.points
-                    else
-                        print("{FF0000}" .. error)
-                    end
-                end
-            end
-        end
-    end
-end
-
-function rendercoordinates()
-    while true do
-        wait(0)
-        if getActiveInterior() == 0 and config.server.showcoordinates then
-            for nick, table in pairs(variables.synchronization) do
-                if table.coordinates ~= nil and nick ~= variables.nick then
-                    if table.coordinates.x ~= nil and table.coordinates.y ~= nil and
-                        table.coordinates.z ~= nil then
-                        local result, x, y, z =
-                            convert3DCoordsToScreenEx(table.coordinates.x,
-                                                      table.coordinates.y,
-                                                      table.coordinates.z)
-                        if result and z > 0 then
-                            local mx, my, mz = getCharCoordinates(PLAYER_PED)
-                            local distance =
-                                getDistanceBetweenCoords3d(mx, my, mz,
-                                                           table.coordinates.x,
-                                                           table.coordinates.y,
-                                                           table.coordinates.z)
-                            local text = string.format(
-                                             "%s [%d sec]\n[%d meters]", nick,
-                                             table.delay, distance)
-                            renderFontDrawText(renderfont, text, x, y,
-                                               0xFFFFFFFF)
-                        end
-                    end
-                end
-            end
-        end
-    end
-end
-
-function renderpoints()
-    while true do
-        wait(0)
-        if getActiveInterior() == 0 and config.server.showpoints then
-            for nick, table in pairs(variables.points) do
-                if table.coordinates ~= nil then
-                    if table.coordinates.x ~= nil and table.coordinates.y ~= nil and
-                        table.coordinates.z ~= nil then
-                        local result, x, y, z =
-                            convert3DCoordsToScreenEx(table.coordinates.x,
-                                                      table.coordinates.y,
-                                                      table.coordinates.z)
-                        if result and z > 0 then
-                            local mx, my, mz = getCharCoordinates(PLAYER_PED)
-                            local distance =
-                                getDistanceBetweenCoords3d(mx, my, mz,
-                                                           table.coordinates.x,
-                                                           table.coordinates.y,
-                                                           table.coordinates.z)
-                            if distance <= 210 then
-                                renderDrawBox(x, y, 25, 25, 0xFFFF0000)
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-end
-
-function checksatiety()
-    while not variables.checkfood.nofood do
-        wait(0)
-        if sampTextdrawIsExists(2048) then
-            local satiety = tonumber(sampTextdrawGetString(2048):match(
-                                         "~[ryg]~(%d+)"))
-            if satiety ~= nil and config.checkfood.satiety then
-                variables.checkfood.satiety = satiety
-                if satiety == 0 then
-                    variables.checkfood.eat = true
-                end
-                if variables.checkfood.eat then
-                    local maxsatiety, food
-                    if config.checkfood.mushroom then
-                        food = "grib"
-                        maxsatiety = 45
-                    else
-                        food = "fish"
-                        maxsatiety = 70
-                    end
-                    if satiety < maxsatiety then
-                        wait(300)
-                        sampSendChat(string.format("/%s eat", food))
-                        wait(300)
-                    else
-                        variables.checkfood.eat = false
-                    end
-                end
-            end
-        end
-    end
-end
-
 function onScriptTerminate(s, bool)
     if s == thisScript() and not bool then
         imgui.Process = false
@@ -1341,11 +1206,149 @@ function main()
 
     msg("Скрипт запущен - /area")
 
-    lua_thread.create(function() synchronization() end)
-    lua_thread.create(function() rendercoordinates() end)
-    lua_thread.create(function() renderpoints() end)
-    lua_thread.create(function() checksatiety() end)
-    
+    lua_thread.create(function()
+        while true do
+            wait(0)
+            if variables.ip ~= nil and variables.port ~= nil then
+                local result, id = sampGetPlayerIdByCharHandle(PLAYER_PED)
+                if result then
+                    local nick = sampGetPlayerNickname(id)
+                    local table = {
+                        type = "synchronization",
+                        nick = nick,
+                        id = id,
+                        password = tostring(config.personal.password),
+                        query = tostring(os.clock()):gsub('%.', '')
+                    }
+                    if config.server.sendcoordinates and getActiveInterior() ==
+                        0 then
+                        local x, y, z = getCharCoordinates(PLAYER_PED)
+                        table.coordinates = {x = x, y = y, z = z}
+                    end
+                    local data = encodeJson(table)
+                    local url = string.format("http://%s:%d/%s", variables.ip,
+                                              variables.port, data)
+                    -- setClipboardText(url)
+                    local response = request(url)
+
+                    if response ~= nil then
+                        -- print(response)
+                        local error = variables.responses[response]
+                        if error == nil then
+                            local serverdata = decodeJson(response)
+                            variables.synchronization =
+                                serverdata.synchronization
+                            variables.points = serverdata.points
+                        else
+                            print("{FF0000}" .. error)
+                        end
+                    end
+                end
+            end
+        end
+    end)
+    lua_thread.create(function()
+        while true do
+            wait(0)
+            if getActiveInterior() == 0 and config.server.showcoordinates then
+                for nick, table in pairs(variables.synchronization) do
+                    if table.coordinates ~= nil and nick ~= variables.nick then
+                        if table.coordinates.x ~= nil and table.coordinates.y ~=
+                            nil and table.coordinates.z ~= nil then
+                            local result, x, y, z =
+                                convert3DCoordsToScreenEx(table.coordinates.x,
+                                                          table.coordinates.y,
+                                                          table.coordinates.z)
+                            if result and z > 0 then
+                                local mx, my, mz =
+                                    getCharCoordinates(PLAYER_PED)
+                                local distance =
+                                    getDistanceBetweenCoords3d(mx, my, mz,
+                                                               table.coordinates
+                                                                   .x,
+                                                               table.coordinates
+                                                                   .y,
+                                                               table.coordinates
+                                                                   .z)
+                                local text = string.format(
+                                                 "%s [%d sec]\n[%d meters]",
+                                                 nick, table.delay, distance)
+                                renderFontDrawText(renderfont, text, x, y,
+                                                   0xFFFFFFFF)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end)
+    lua_thread.create(function()
+        while true do
+            wait(0)
+            if getActiveInterior() == 0 and config.server.showpoints then
+                for nick, table in pairs(variables.points) do
+                    if table.coordinates ~= nil then
+                        if table.coordinates.x ~= nil and table.coordinates.y ~=
+                            nil and table.coordinates.z ~= nil then
+                            local result, x, y, z =
+                                convert3DCoordsToScreenEx(table.coordinates.x,
+                                                          table.coordinates.y,
+                                                          table.coordinates.z)
+                            if result and z > 0 then
+                                local mx, my, mz =
+                                    getCharCoordinates(PLAYER_PED)
+                                local distance =
+                                    getDistanceBetweenCoords3d(mx, my, mz,
+                                                               table.coordinates
+                                                                   .x,
+                                                               table.coordinates
+                                                                   .y,
+                                                               table.coordinates
+                                                                   .z)
+                                if distance <= 210 then
+                                    renderDrawBox(x, y, 25, 25, 0xFFFF0000)
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end)
+    lua_thread.create(function()
+        while not variables.checkfood.nofood do
+            wait(0)
+            if sampTextdrawIsExists(2048) then
+                local satiety = tonumber(
+                                    sampTextdrawGetString(2048):match(
+                                        "~[ryg]~(%d+)"))
+                if satiety ~= nil and config.checkfood.satiety then
+                    variables.checkfood.satiety = satiety
+                    if satiety == 0 then
+                        variables.checkfood.eat = true
+                    end
+                    if variables.checkfood.eat then
+                        local maxsatiety, food
+                        if config.checkfood.mushroom then
+                            food = "grib"
+                            maxsatiety = 45
+                        else
+                            food = "fish"
+                            maxsatiety = 70
+                        end
+                        if satiety < maxsatiety then
+                            wait(300)
+                            sampSendChat(string.format("/%s eat", food))
+                            wait(300)
+                        else
+                            variables.checkfood.eat = false
+                        end
+                    end
+                end
+            end
+        end
+    end)
+
     variables.loaded = true
     variables.need.reload = true
     variables.need.stats = true
