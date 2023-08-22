@@ -1,6 +1,6 @@
 script_name("Special script for AREA 51")
 script_author("Leonid_Brezhnev")
-script_version_number(5)
+script_version_number(6)
 
 function try(f, catch_f)
     local status, exception = pcall(f)
@@ -1644,15 +1644,15 @@ function sampev.onShowDialog(dialogId, style, title, button1, button2, text)
 end
 
 function sampev.onServerMessage(col, text)
-    if variables.loaded then
-        if col == -356056833 and string.find(text,
-                                             "^ Для восстановления доступа нажмите клавишу %'F6%' и введите %'%/restoreAccess%'") then
-            variables.need.clist = true
-            if variables.need.reload then
-                variables.reload = true
-                thisScript():reload()
-            end
+    if col == -356056833 and string.find(text,
+                                         "^ Для восстановления доступа нажмите клавишу %'F6%' и введите %'%/restoreAccess%'") then
+        variables.need.clist = true
+        if variables.need.reload then
+            variables.reload = true
+            thisScript():reload()
         end
+    end
+    if variables.loaded then
         if col == -1342193921 and
             string.find(text,
                         "^ У вас недостаточно пачек рыбы$") then
