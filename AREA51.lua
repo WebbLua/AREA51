@@ -1,6 +1,6 @@
 script_name("Special script for AREA 51")
 script_author("Leonid_Brezhnev")
-script_version_number(4)
+script_version_number(5)
 
 function try(f, catch_f)
     local status, exception = pcall(f)
@@ -38,6 +38,7 @@ local variables = {
     ip = nil,
     port = nil,
     logined = false,
+    loaded = false,
     request = {complete = true, free = true},
     synchronization = {},
     points = {},
@@ -508,6 +509,15 @@ function string.split(str, delim, plain) -- bh FYP
     return tokens
 end
 
+function sampGetPlayerIdByNickname(nick)
+    local _, myid = sampGetPlayerIdByCharHandle(playerPed)
+    if tostring(nick) == sampGetPlayerNickname(myid) then return myid end
+    for i = 0, 1000 do
+        if sampIsPlayerConnected(i) and sampGetPlayerNickname(i) ==
+            tostring(nick) then return i end
+    end
+end
+
 function makeHotKey(numkey)
     local rett = {}
     for _, v in ipairs(string.split(config.hotkey[numkey], ", ")) do
@@ -523,24 +533,45 @@ local clr = imgui.Col
 local ImVec2 = imgui.ImVec2
 local ImVec4 = imgui.ImVec4
 
+function toScreenY(gY)
+    local x, y = convertGameScreenCoordsToWindowScreenCoords(0, gY)
+    return y
+end
+
+function toScreenX(gX)
+    local x, y = convertGameScreenCoordsToWindowScreenCoords(gX, 0)
+    return x
+end
+
+function toScreen(gX, gY)
+    local s = {}
+    s.x, s.y = convertGameScreenCoordsToWindowScreenCoords(gX, gY)
+    return s
+end
+
+function vec(gX, gY)
+    local x, y = convertGameScreenCoordsToWindowScreenCoords(gX, gY)
+    return imgui.ImVec2(x, y)
+end
+
 function imgui.ApplyCustomStyle()
     imgui.SwitchContext()
     style.WindowRounding = 4.0
-    style.WindowTitleAlign = ImVec2(0.5, 0.5)
+    style.WindowTitleAlign = vec(0.5 / 3, 0.5 / 2.4107143878937)
     style.ChildWindowRounding = 2.0
     style.FrameRounding = 2.0
-    style.ItemSpacing = ImVec2(10, 5)
+    style.ItemSpacing = vec(10 / 3, 5 / 2.4107143878937)
     style.ScrollbarSize = 15
     style.ScrollbarRounding = 0
     style.GrabMinSize = 9.6
     style.GrabRounding = 1.0
-    style.WindowPadding = ImVec2(10, 10)
+    style.WindowPadding = vec(10 / 3, 10 / 2.4107143878937)
     style.AntiAliasedLines = true
     style.AntiAliasedShapes = true
-    style.FramePadding = ImVec2(5, 4)
-    style.DisplayWindowPadding = ImVec2(27, 27)
-    style.DisplaySafeAreaPadding = ImVec2(5, 5)
-    style.ButtonTextAlign = ImVec2(0.5, 0.5)
+    style.FramePadding = vec(5 / 3, 4 / 2.4107143878937)
+    style.DisplayWindowPadding = vec(27 / 3, 27 / 2.4107143878937)
+    style.DisplaySafeAreaPadding = vec(5 / 3, 5 / 2.4107143878937)
+    style.ButtonTextAlign = vec(0.5 / 3, 0.5 / 2.4107143878937)
 
     colors[clr.Text] = ImVec4(0.92, 0.92, 0.92, 1.00)
     colors[clr.TextDisabled] = ImVec4(0.44, 0.44, 0.44, 1.00)
@@ -597,27 +628,6 @@ function imgui.initBuffers()
     for index, msg in ipairs(config.clistmsg) do
         buffer.clistmsg[index] = imgui.ImBuffer(msg, 256)
     end
-end
-
-function toScreenY(gY)
-    local x, y = convertGameScreenCoordsToWindowScreenCoords(0, gY)
-    return y
-end
-
-function toScreenX(gX)
-    local x, y = convertGameScreenCoordsToWindowScreenCoords(gX, 0)
-    return x
-end
-
-function toScreen(gX, gY)
-    local s = {}
-    s.x, s.y = convertGameScreenCoordsToWindowScreenCoords(gX, gY)
-    return s
-end
-
-function vec(gX, gY)
-    local x, y = convertGameScreenCoordsToWindowScreenCoords(gX, gY)
-    return imgui.ImVec2(x, y)
 end
 
 function imgui.SameText(...)
@@ -1025,8 +1035,15 @@ function imgui.OnDrawFrame()
             inicfg.save(config, settings)
         end
         imgui.SameText(string.format(
-                           "Вводить /clist %d после начала рабочего дня",
+                           "Вводить /clist %d после начала рабочего дня\nи /clist 7 после окончания",
                            config.personal.clist))
+        if imgui.ToggleButton("##clist_synchronization",
+                              imgui.ImBool(config.clist.synchronization)) then
+            config.clist.synchronization = not config.clist.synchronization
+            inicfg.save(config, settings)
+        end
+        imgui.SameText(
+            "Синхронизация своего клиста с клистом водителя")
         if imgui.ToggleButton("##clist_me", imgui.ImBool(config.clist.me)) then
             config.clist.me = not config.clist.me
             inicfg.save(config, settings)
@@ -1044,21 +1061,28 @@ function imgui.OnDrawFrame()
         imgui.EndChild()
         imgui.SameLine()
         imgui.BeginChild("Горячие клавиши", vec(150, 66), true)
-        imgui.Hotkey("fraction", "fraction", 50)
+        imgui.Hotkey("fraction", "fraction", 40)
         imgui.SameText(string.format(
                            "Написать текст в рацию\n(/f %s)",
                            config.personal.tag))
-        imgui.Hotkey("changeclist", "changeclist", 50)
+        imgui.Hotkey("changeclist", "changeclist", 40)
         imgui.SameText(string.format(
                            "Переключить клист\n(/clist %d)",
                            config.personal.clist))
-        imgui.Hotkey("gribheal", "gribheal", 50)
+        imgui.Hotkey("gribheal", "gribheal", 40)
         imgui.SameText("Употребить психохил\n(/grib heal)")
-        imgui.Hotkey("point", "point", 50)
+        imgui.Hotkey("point", "point", 40)
         imgui.SameText("Установить метку для внимания")
         imgui.EndChild()
         imgui.BeginChild("Взятие оружия со склада",
                          vec(150, 95), true)
+        if imgui.ToggleButton("##take_weapon",
+                              imgui.ImBool(config.dialogs.weapon)) then
+            config.dialogs.weapon = not config.dialogs.weapon
+            inicfg.save(config, settings)
+        end
+        imgui.SameText(
+            "Реагировать на диалог в оружейке\n(обязательно включите для оружия)")
         if imgui.ToggleButton("##take_deagle", imgui.ImBool(config.take.deagle)) then
             config.take.deagle = not config.take.deagle
             inicfg.save(config, settings)
@@ -1127,8 +1151,8 @@ function imgui.OnDrawFrame()
             imgui.NextColumn()
         end
         imgui.EndChild()
-        imgui.SetCursorPos(vec(156.7, 144))
-        imgui.BeginChild("Прочее", vec(150, 200), true)
+        imgui.SetCursorPos(vec(156.7, 143.2))
+        imgui.BeginChild("Прочее", vec(150, 185.9), true)
         if imgui.ToggleButton("##checkfood_satiety",
                               imgui.ImBool(config.checkfood.satiety)) then
             config.checkfood.satiety = not config.checkfood.satiety
@@ -1157,6 +1181,19 @@ function imgui.OnDrawFrame()
         end
         imgui.SameText(
             "Отыгрывать /seedo при нажатии кнопки рации")
+        if imgui.ToggleButton("##elevator",
+                              imgui.ImBool(config.dialogs.elevator)) then
+            config.dialogs.elevator = not config.dialogs.elevator
+            inicfg.save(config, settings)
+        end
+        imgui.SameText(
+            "\"Лифт\" - принимать диалоги в штабе.\nПри зажатии кнопки ALT можно попасть на 3 этаж")
+        if imgui.ToggleButton("##duty", imgui.ImBool(config.dialogs.duty)) then
+            config.dialogs.duty = not config.dialogs.duty
+            inicfg.save(config, settings)
+        end
+        imgui.SameText(
+            "Принимать диалог начала рабочего дня")
         imgui.EndChild()
         imgui.End()
     end
@@ -1166,6 +1203,8 @@ function main()
     if not isSampLoaded() or not isSampfuncsLoaded() then return end
     while not isSampAvailable() do wait(0) end
     while sampGetCurrentServerName() == "SA-MP" do wait(0) end
+    while sampGetPlayerScore(select(2, sampGetPlayerIdByCharHandle(PLAYER_PED))) <=
+        0 and not sampIsLocalPlayerSpawned() do wait(0) end
     local url, status = isUpdate()
     while not variables.checkedUpdates do wait(0) end
     if status then
@@ -1209,7 +1248,14 @@ function main()
             fractionseedo = false,
             password = ""
         },
-        clist = {area = false, death = false, duty = false, me = false},
+        clist = {
+            area = false,
+            death = false,
+            duty = false,
+            stopduty = false,
+            synchronization = false,
+            me = false
+        },
         clistmsg = {
             [1] = "повязку №1",
             [2] = "повязку №2",
@@ -1262,6 +1308,7 @@ function main()
             showpoints = true
         },
         checkfood = {satiety = false, mushroom = false, sbiv = false},
+        dialogs = {weapon = false, elevator = false, duty = false},
         hotkey = {
             fraction = "0",
             changeclist = "0",
@@ -1278,8 +1325,6 @@ function main()
     imgui.initBuffers()
     renderfont = renderCreateFont("times", toScreenX(9 / 3), 12)
 
-    while sampGetPlayerScore(select(2, sampGetPlayerIdByCharHandle(PLAYER_PED))) <=
-        0 and not sampIsLocalPlayerSpawned() do wait(0) end
     sampRegisterChatCommand("area", area)
     if config.personal.password ~= "" and config.personal.password ~= nil then
         login(config.personal.password)
@@ -1295,14 +1340,17 @@ function main()
     lua_thread.create(chatManager.checkMessagesQueueThread)
 
     msg("Скрипт запущен - /area")
+
+    lua_thread.create(function() synchronization() end)
+    lua_thread.create(function() rendercoordinates() end)
+    lua_thread.create(function() renderpoints() end)
+    lua_thread.create(function() checksatiety() end)
+    
+    variables.loaded = true
     variables.need.reload = true
     variables.need.stats = true
-    chatManager.addMessageToQueue("/stats", true)
 
-    lua_thread.create(synchronization)
-    lua_thread.create(rendercoordinates)
-    lua_thread.create(renderpoints)
-    lua_thread.create(checksatiety)
+    chatManager.addMessageToQueue("/stats", true)
     while true do
         wait(0)
         if not imgui.main.v then
@@ -1388,215 +1436,294 @@ function setPlayerClist(clist)
 end
 
 function sampev.onShowDialog(dialogId, style, title, button1, button2, text)
-    if dialogId == 22 and style == 4 and title ==
-        "Статистика персонажа" then
-        if not string.find(text, "Организация%s+Army LV") then
-            config.personal.rank = "Гражданский"
+    if variables.loaded then
+        if dialogId == 22 and style == 4 and title ==
+            "Статистика персонажа" then
+            if not string.find(text, "Организация%s+Army LV") then
+                config.personal.rank = "Гражданский"
+            end
+            local i = tonumber(string.match(text, "Ранг.*%[(%d+)%]"))
+            if i ~= nil then
+                local rank = variables.ranks[i]
+                config.personal.rank = rank ~= nil and rank or
+                                           "Гражданский"
+            else
+                config.personal.rank = "Гражданский"
+            end
+            inicfg.save(config, settings)
+            if variables.need.stats then
+                variables.need.stats = false
+                return false
+            end
         end
-        local i = tonumber(string.match(text, "Ранг.*%[(%d+)%]"))
-        if i ~= nil then
-            local rank = variables.ranks[i]
-            config.personal.rank = rank ~= nil and rank or
-                                       "Гражданский"
-        else
-            config.personal.rank = "Гражданский"
+        if config.dialogs.elevator and dialogId == 288 and
+            string.find(text, "1 Этаж: Холл") then
+            local pickups = 0
+            local myX, myY, myZ = getCharCoordinates(PLAYER_PED)
+
+            for i, v in ipairs(getAllPickups()) do
+                local cX, cY, cZ = getPickupCoordinates(v)
+                local distanse = math.ceil(
+                                     math.sqrt(((myX - cX) ^ 2) +
+                                                   ((myY - cY) ^ 2) +
+                                                   ((myZ - cZ) ^ 2)))
+                if distanse <= 16 then pickups = pickups + 1 end
+            end
+
+            if pickups == 3 then -- 1st floor
+                sampSendDialogResponse(dialogId, 1,
+                                       isKeyDown(vkeys.VK_MENU) and 2 or 1, "")
+                sampCloseCurrentDialogWithButton(0)
+                return false
+            elseif pickups == 2 or pickups == 1 then -- 2nd and 3rd floors
+                sampSendDialogResponse(dialogId, 1,
+                                       isKeyDown(vkeys.VK_MENU) and 2 or 0, "")
+                sampCloseCurrentDialogWithButton(0)
+                return false
+            end
         end
-        inicfg.save(config, settings)
-        if variables.need.stats then
-            variables.need.stats = false
-            return false
-        end
-    end
-    if dialogId == 245 and title == "Склад оружия" then
-        variables.warehouse.taken = false
-        if config.take.deagle then
-            local a = getAmmoInCharWeapon(PLAYER_PED, 24)
-            if a <= 61 then
+        if config.dialogs.duty then
+            if dialogId == 184 and style == 0 and title ==
+                "Раздевалка" and button1 == "Да" and button2 ==
+                "Нет" and
+                string.find(text,
+                            "Вы хотите начать рабочий день?") then
                 sampSendDialogResponse(dialogId, 1, 0, "")
-                variables.warehouse.taken = true
-                variables.warehouse.isDeagleTaken = true
+                sampCloseCurrentDialogWithButton(0)
+                return false
+            end
+            if dialogId == 185 and style == 2 and title ==
+                "Раздевалка" and button1 == "Далее" and button2 ==
+                "Отмена" and
+                string.find(text, "Завершить рабочий день") then
+                local result, skin = getCharModel(PLAYER_PED)
+                local response = (skin == 252 or skin == 140) and 1 or 0
+                sampSendDialogResponse(dialogId, 1, response, "")
+                sampCloseCurrentDialogWithButton(0)
                 return false
             end
         end
-
-        if config.take.shotgun then
-            local a = getAmmoInCharWeapon(PLAYER_PED, 25)
-            if a <= 28 then
-                sampSendDialogResponse(dialogId, 1, 1, "")
-                variables.warehouse.taken = true
-                variables.warehouse.isShotgunTaken = true
-                return false
-            end
-        end
-
-        if config.take.smg then
-            local a = getAmmoInCharWeapon(PLAYER_PED, 29)
-            if a <= 178 then
-                sampSendDialogResponse(dialogId, 1, 2, "")
-                variables.warehouse.taken = true
-                variables.warehouse.isSMGTaken = true
-                return false
-            end
-        end
-
-        if config.take.m4a1 then
-            local a = getAmmoInCharWeapon(PLAYER_PED, 31)
-            if a <= 290 then
-                sampSendDialogResponse(dialogId, 1, 3, "")
-                variables.warehouse.taken = true
-                variables.warehouse.isM4A1Taken = true
-                return false
-            end
-        end
-
-        if config.take.rifle then
-            local a = getAmmoInCharWeapon(PLAYER_PED, 33)
-            if a <= 28 then
-                sampSendDialogResponse(dialogId, 1, 4, "")
-                variables.warehouse.taken = true
-                variables.warehouse.isRifleTaken = true
-                return false
-            end
-        end
-
-        if not variables.warehouse.isArmorTaken then
-            sampSendDialogResponse(dialogId, 1, 5, "")
-            variables.warehouse.taken = true
-            variables.warehouse.isArmorTaken = true
-            return false
-        end
-
-        if config.take.parachute and
-            (os.time() > variables.warehouse.parachuteTimer) then
-            local a = getAmmoInCharWeapon(PLAYER_PED, 46)
-            if a ~= 1 then
-                sampSendDialogResponse(dialogId, 1, 6, "")
-                variables.warehouse.taken = true
-                variables.warehouse.isParachuteTaken = true
-                variables.warehouse.parachuteTimer = os.time() + 60
-                return false
-            end
-        end
-
-        if not variables.warehouse.taken then
-            if config.take.me then
-                local otsrt = ""
-                if variables.warehouse.isArmorTaken then
-                    otsrt = "бронежилет"
+        if config.dialogs.weapon and dialogId == 245 and title ==
+            "Склад оружия" then
+            variables.warehouse.taken = false
+            if config.take.deagle then
+                local a = getAmmoInCharWeapon(PLAYER_PED, 24)
+                if a <= 61 then
+                    sampSendDialogResponse(dialogId, 1, 0, "")
+                    variables.warehouse.taken = true
+                    variables.warehouse.isDeagleTaken = true
+                    return false
                 end
-                if variables.warehouse.isDeagleTaken then
-                    otsrt = otsrt == "" and "Desert Eagle" or "" .. otsrt ..
-                                ", Desert Eagle"
+            end
+
+            if config.take.shotgun then
+                local a = getAmmoInCharWeapon(PLAYER_PED, 25)
+                if a <= 28 then
+                    sampSendDialogResponse(dialogId, 1, 1, "")
+                    variables.warehouse.taken = true
+                    variables.warehouse.isShotgunTaken = true
+                    return false
                 end
-                if variables.warehouse.isShotgunTaken then
-                    otsrt = otsrt == "" and "Shotgun" or "" .. otsrt ..
-                                ", Shotgun"
+            end
+
+            if config.take.smg then
+                local a = getAmmoInCharWeapon(PLAYER_PED, 29)
+                if a <= 178 then
+                    sampSendDialogResponse(dialogId, 1, 2, "")
+                    variables.warehouse.taken = true
+                    variables.warehouse.isSMGTaken = true
+                    return false
                 end
-                if variables.warehouse.isSMGTaken then
-                    otsrt = otsrt == "" and "HK MP-5" or "" .. otsrt ..
-                                ", HK MP-5"
+            end
+
+            if config.take.m4a1 then
+                local a = getAmmoInCharWeapon(PLAYER_PED, 31)
+                if a <= 290 then
+                    sampSendDialogResponse(dialogId, 1, 3, "")
+                    variables.warehouse.taken = true
+                    variables.warehouse.isM4A1Taken = true
+                    return false
                 end
-                if variables.warehouse.isM4A1Taken then
-                    otsrt = otsrt == "" and "M4A1" or "" .. otsrt .. ", M4A1"
+            end
+
+            if config.take.rifle then
+                local a = getAmmoInCharWeapon(PLAYER_PED, 33)
+                if a <= 28 then
+                    sampSendDialogResponse(dialogId, 1, 4, "")
+                    variables.warehouse.taken = true
+                    variables.warehouse.isRifleTaken = true
+                    return false
                 end
-                if variables.warehouse.isRifleTaken then
-                    otsrt = otsrt == "" and "Country Rifle" or "" .. otsrt ..
+            end
+
+            if config.take.armor and not variables.warehouse.isArmorTaken then
+                sampSendDialogResponse(dialogId, 1, 5, "")
+                variables.warehouse.taken = true
+                variables.warehouse.isArmorTaken = true
+                return false
+            end
+
+            if config.take.parachute and
+                (os.time() > variables.warehouse.parachuteTimer) then
+                local a = getAmmoInCharWeapon(PLAYER_PED, 46)
+                if a ~= 1 then
+                    sampSendDialogResponse(dialogId, 1, 6, "")
+                    variables.warehouse.taken = true
+                    variables.warehouse.isParachuteTaken = true
+                    variables.warehouse.parachuteTimer = os.time() + 60
+                    return false
+                end
+            end
+
+            if not variables.warehouse.taken then
+                if config.take.me then
+                    local otsrt = ""
+                    if variables.warehouse.isArmorTaken then
+                        otsrt = "бронежилет"
+                    end
+                    if variables.warehouse.isDeagleTaken then
+                        otsrt = otsrt == "" and "Desert Eagle" or "" .. otsrt ..
+                                    ", Desert Eagle"
+                    end
+                    if variables.warehouse.isShotgunTaken then
+                        otsrt = otsrt == "" and "Shotgun" or "" .. otsrt ..
+                                    ", Shotgun"
+                    end
+                    if variables.warehouse.isSMGTaken then
+                        otsrt = otsrt == "" and "HK MP-5" or "" .. otsrt ..
+                                    ", HK MP-5"
+                    end
+                    if variables.warehouse.isM4A1Taken then
+                        otsrt = otsrt == "" and "M4A1" or "" .. otsrt ..
+                                    ", M4A1"
+                    end
+                    if variables.warehouse.isRifleTaken then
+                        otsrt =
+                            otsrt == "" and "Country Rifle" or "" .. otsrt ..
                                 ", Country Rifle"
-                end
-                if variables.warehouse.isParachuteTaken then
-                    otsrt = otsrt == "" and "парашют" or "" .. otsrt ..
+                    end
+                    if variables.warehouse.isParachuteTaken then
+                        otsrt =
+                            otsrt == "" and "парашют" or "" .. otsrt ..
                                 ", парашют"
-                end
-                if otsrt ~= "" then
-                    sampSendChat("/me взял" .. config.personal.sex ..
-                                     " со склада " .. otsrt .. "")
-                end
-            end
-            sampSendDialogResponse(dialogId, 0, 5, "")
-            sampCloseCurrentDialogWithButton(0)
-            variables.warehouse.isArmorTaken, variables.warehouse.isDeagleTaken, variables.warehouse
-                .isShotgunTaken, variables.warehouse.isSMGTaken, variables.warehouse
-                .isM4A1Taken, variables.warehouse.isRifleTaken, variables.warehouse
-                .isParachuteTaken, variables.warehouse.taken = false, false,
-                                                               false, false,
-                                                               false, false,
-                                                               false, false
-            if config.take.pickup then
-                local myX, myY, myZ = getCharCoordinates(PLAYER_PED)
-                for i, v in ipairs(getAllPickups()) do
-                    local cX, cY, cZ = getPickupCoordinates(v)
-                    local distance = math.ceil(
-                                         math.sqrt(((myX - cX) ^ 2) +
-                                                       ((myY - cY) ^ 2) +
-                                                       ((myZ - cZ) ^ 2)))
-                    if distance <= 5 and distance > 1 then
-                        sampSendPickedUpPickup(sampGetPickupSampIdByHandle(v))
+                    end
+                    if otsrt ~= "" then
+                        sampSendChat("/me взял" .. config.personal.sex ..
+                                         " со склада " .. otsrt .. "")
                     end
                 end
+                sampSendDialogResponse(dialogId, 0, 5, "")
+                sampCloseCurrentDialogWithButton(0)
+                variables.warehouse.isArmorTaken, variables.warehouse
+                    .isDeagleTaken, variables.warehouse.isShotgunTaken, variables.warehouse
+                    .isSMGTaken, variables.warehouse.isM4A1Taken, variables.warehouse
+                    .isRifleTaken, variables.warehouse.isParachuteTaken, variables.warehouse
+                    .taken = false, false, false, false, false, false, false,
+                             false
+                if config.take.pickup then
+                    local myX, myY, myZ = getCharCoordinates(PLAYER_PED)
+                    for i, v in ipairs(getAllPickups()) do
+                        local cX, cY, cZ = getPickupCoordinates(v)
+                        local distance = math.ceil(
+                                             math.sqrt(((myX - cX) ^ 2) +
+                                                           ((myY - cY) ^ 2) +
+                                                           ((myZ - cZ) ^ 2)))
+                        if distance <= 5 and distance > 1 then
+                            sampSendPickedUpPickup(
+                                sampGetPickupSampIdByHandle(v))
+                        end
+                    end
+                end
+                return false
             end
-            return false
         end
     end
 end
 
 function sampev.onServerMessage(col, text)
-    if col == -356056833 and string.find(text,
-                                         "^ Для восстановления доступа нажмите клавишу %'F6%' и введите %'%/restoreAccess%'") then
-        variables.need.clist = true
-        if variables.need.reload then
-            variables.reload = true
-            thisScript():reload()
+    if variables.loaded then
+        if col == -356056833 and string.find(text,
+                                             "^ Для восстановления доступа нажмите клавишу %'F6%' и введите %'%/restoreAccess%'") then
+            variables.need.clist = true
+            if variables.need.reload then
+                variables.reload = true
+                thisScript():reload()
+            end
         end
-    end
-    if col == -1342193921 and
-        string.find(text,
-                    "^ У вас недостаточно пачек рыбы$") then
-        variables.checkfood.fish = false
-        config.checkfood.mushroom = true
-        if not variables.checkfood.fish and not variables.checkfood.mushroom then
-            variables.checkfood.nofood = true
-            return
+        if col == -1342193921 and
+            string.find(text,
+                        "^ У вас недостаточно пачек рыбы$") then
+            variables.checkfood.fish = false
+            config.checkfood.mushroom = true
+            if not variables.checkfood.fish and not variables.checkfood.mushroom then
+                variables.checkfood.nofood = true
+                return
+            end
         end
-    end
-    if col == -1347440641 and
-        string.find(text,
-                    "^ Недостаточно готовых грибов$") then
-        variables.checkfood.mushroom = false
-        config.checkfood.mushrom = false
-        if not variables.checkfood.fish and not variables.checkfood.mushroom then
-            variables.checkfood.nofood = true
-            return
+        if col == -1347440641 and
+            string.find(text,
+                        "^ Недостаточно готовых грибов$") then
+            variables.checkfood.mushroom = false
+            config.checkfood.mushrom = false
+            if not variables.checkfood.fish and not variables.checkfood.mushroom then
+                variables.checkfood.nofood = true
+                return
+            end
         end
-    end
-    if col == 1790050303 and config.clist.duty then
-        if string.find(text, "^ Рабочий день окончен$") then
-            setPlayerClist(7)
-        elseif string.find(text, "^ Рабочий день начат$") then
-            setPlayerClist(config.personal.clist)
+        if col == 1790050303 and config.clist.duty then
+            if string.find(text, "^ Рабочий день окончен$") then
+                setPlayerClist(7)
+            elseif string.find(text, "^ Рабочий день начат$") then
+                setPlayerClist(config.personal.clist)
+            end
         end
-    end
-    if col == -1 and (string.find(text,
-                                  "^ Здоровье %d+%/%d+%. Сытость %d+%/%d+%. У вас осталось %d+%/%d+% психохила$") or
-        string.find(text,
-                    "^ Вы истощены%. Здоровье снижено до %d+%/%d+%. У вас осталось %d+%/%d+% психохила$")) and
-        config.checkfood.sbiv and not isCharInAnyCar(PLAYER_PED) then
-        lua_thread.create(function()
-            wait(1)
-            sampSendChat(" ")
-        end)
+        if col == -1 and (string.find(text,
+                                      "^ Здоровье %d+%/%d+%. Сытость %d+%/%d+%. У вас осталось %d+%/%d+% психохила$") or
+            string.find(text,
+                        "^ Вы истощены%. Здоровье снижено до %d+%/%d+%. У вас осталось %d+%/%d+% психохила$")) and
+            config.checkfood.sbiv and not isCharInAnyCar(PLAYER_PED) then
+            lua_thread.create(function()
+                wait(1)
+                sampSendChat(" ")
+            end)
+        end
     end
 end
 
 function sampev.onSendDeathNotification(reason, id)
-    if config.clist.death then
-        local skin = getCharModel(PLAYER_PED)
-        if skin == 287 or skin == 191 then
-            if config.personal.clist ~= nil then
-                lua_thread.create(function()
-                    repeat wait(0) until getActiveInterior() ~= 0
-                    setPlayerClist(config.personal.clist)
-                end)
+    if variables.loaded then
+        if config.clist.death then
+            local skin = getCharModel(PLAYER_PED)
+            if skin == 287 or skin == 191 then
+                if config.personal.clist ~= nil then
+                    lua_thread.create(function()
+                        repeat wait(0) until getActiveInterior() ~= 0
+                        setPlayerClist(config.personal.clist)
+                    end)
+                end
             end
+        end
+    end
+end
+
+function sampev.onSetPlayerColor(id, color)
+    if variables.loaded then
+        if variables.logined and config.clist.synchronization and
+            isCharInAnyCar(PLAYER_PED) then
+            local result, ped = sampGetCharHandleBySampPlayerId(id)
+            if not result or ped == PLAYER_PED then
+                return {id, color}
+            end
+
+            local car = storeCarCharIsInNoSave(PLAYER_PED)
+            local driver = getDriverOfCar(car)
+            if ped ~= driver then return {id, color} end
+            local cl = variables.clists[color]
+            local mycl = variables.clists[sampGetPlayerColor(select(2,
+                                                                    sampGetPlayerIdByCharHandle(
+                                                                        PLAYER_PED)))]
+            if cl == mycl then return end
+            setPlayerClist()
         end
     end
 end
